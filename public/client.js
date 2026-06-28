@@ -838,8 +838,23 @@ function getOrCreatePeerConnection(peerId, peerName) {
     createOrUpdateVideoTile(peerId, peerName, remoteStream, event.track);
   };
 
+  let failTimeout = null;
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+    console.log(`📡 WebRTC Connection State for ${peerName}: ${pc.connectionState}`);
+    if (pc.connectionState === 'failed') {
+      // Wait 8 seconds before closing to allow auto-recovery or ICE restart
+      failTimeout = setTimeout(() => {
+        if (pc.connectionState === 'failed') {
+          console.warn(`❌ Connection to ${peerName} failed permanently.`);
+          closePeerConnection(peerId);
+        }
+      }, 8000);
+    } else if (pc.connectionState === 'connected' || pc.connectionState === 'completed') {
+      if (failTimeout) {
+        clearTimeout(failTimeout);
+        failTimeout = null;
+      }
+    } else if (pc.connectionState === 'closed') {
       closePeerConnection(peerId);
     }
   };
@@ -1773,3 +1788,19 @@ document.addEventListener('DOMContentLoaded', () => {
   changeLanguage(currentLang);
 });
 changeLanguage(currentLang);
+
+// Global click/tap listener to resolve iOS/Safari media play blocks
+window.addEventListener('click', () => {
+  document.querySelectorAll('video').forEach(video => {
+    if (video && video.paused) {
+      video.play().catch(() => {});
+    }
+  });
+});
+window.addEventListener('touchstart', () => {
+  document.querySelectorAll('video').forEach(video => {
+    if (video && video.paused) {
+      video.play().catch(() => {});
+    }
+  });
+});
