@@ -44,7 +44,7 @@ app.get('/health', async (req, res) => {
 // ========================================================================
 const https = require('https');
 const METERED_DOMAIN = process.env.METERED_DOMAIN || 'system4.metered.live';
-const METERED_API_KEY = process.env.METERED_API_KEY || 'v1U5BRFnXuIYAQZhc1wRyfue0u6pt851lX-RCpJ3oqvf9tt1';
+const METERED_API_KEY = process.env.METERED_API_KEY || 'c153db0d8dfe9e3e3b92387b841e18014b9b';
 
 let cachedTurnCredentials = null;
 let turnCacheExpiry = 0;

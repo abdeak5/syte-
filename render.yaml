@@ -13,4 +13,4 @@ services:
       - key: METERED_DOMAIN
         value: system4.metered.live
       - key: METERED_API_KEY
-        value: v1U5BRFnXuIYAQZhc1wRyfue0u6pt851lX-RCpJ3oqvf9tt1
+        value: c153db0d8dfe9e3e3b92387b841e18014b9b
