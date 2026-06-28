@@ -42,12 +42,39 @@ app.get('/health', async (req, res) => {
 // ========================================================================
 // TURN Server Credentials (Metered.ca)
 // ========================================================================
+const https = require('https');
 const METERED_DOMAIN = process.env.METERED_DOMAIN || 'system4.metered.live';
 const METERED_API_KEY = process.env.METERED_API_KEY || 'v1U5BRFnXuIYAQZhc1wRyfue0u6pt851lX-RCpJ3oqvf9tt1';
 
 let cachedTurnCredentials = null;
 let turnCacheExpiry = 0;
 const TURN_CACHE_TTL = 5 * 60 * 1000; // Cache for 5 minutes
+
+function fetchMeteredCredentials() {
+  return new Promise((resolve, reject) => {
+    const url = `https://${METERED_DOMAIN}/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`;
+    console.log(`🔑 Fetching TURN from: ${url}`);
+    
+    https.get(url, (resp) => {
+      let data = '';
+      resp.on('data', (chunk) => { data += chunk; });
+      resp.on('end', () => {
+        if (resp.statusCode !== 200) {
+          reject(new Error(`Metered API returned HTTP ${resp.statusCode}: ${data}`));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          resolve(parsed);
+        } catch (e) {
+          reject(new Error(`Failed to parse Metered response: ${data.substring(0, 200)}`));
+        }
+      });
+    }).on('error', (err) => {
+      reject(new Error(`HTTPS request failed: ${err.message}`));
+    });
+  });
+}
 
 app.get('/api/turn-credentials', async (req, res) => {
   try {
@@ -56,26 +83,39 @@ app.get('/api/turn-credentials', async (req, res) => {
       return res.json(cachedTurnCredentials);
     }
 
-    const response = await fetch(
-      `https://${METERED_DOMAIN}/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`
-    );
-
-    if (!response.ok) {
-      throw new Error(`Metered API returned ${response.status}`);
-    }
-
-    cachedTurnCredentials = await response.json();
+    cachedTurnCredentials = await fetchMeteredCredentials();
     turnCacheExpiry = now + TURN_CACHE_TTL;
 
-    console.log('🔑 Fetched fresh TURN credentials from Metered.ca');
+    console.log(`🔑 TURN credentials loaded: ${cachedTurnCredentials.length} servers`);
     res.json(cachedTurnCredentials);
   } catch (err) {
     console.error('❌ Failed to fetch TURN credentials:', err.message);
-    // Fallback to basic STUN-only if Metered API is unreachable
+    // Return error info + fallback STUN
     res.json([
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' }
     ]);
+  }
+});
+
+// Debug endpoint to verify TURN setup
+app.get('/api/turn-debug', async (req, res) => {
+  try {
+    const credentials = await fetchMeteredCredentials();
+    res.json({
+      status: 'ok',
+      domain: METERED_DOMAIN,
+      apiKeyPrefix: METERED_API_KEY.substring(0, 8) + '...',
+      serversCount: credentials.length,
+      servers: credentials
+    });
+  } catch (err) {
+    res.json({
+      status: 'error',
+      domain: METERED_DOMAIN,
+      apiKeyPrefix: METERED_API_KEY.substring(0, 8) + '...',
+      error: err.message
+    });
   }
 });
 
