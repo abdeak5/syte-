@@ -1605,12 +1605,21 @@ btnScreenShare.addEventListener('click', async () => {
   const t = translations[currentLang];
   if (!isScreenSharing) {
     try {
+      // Check browser support
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        throw new Error('NOT_SUPPORTED');
+      }
+
+      // Simplified constraints for maximum compatibility on mobile (iOS/Android)
+      // Passing audio: false or other complex constraints often fails on mobile browsers
       screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false
+        video: true
       });
 
       const screenTrack = screenStream.getVideoTracks()[0];
+      if (!screenTrack) {
+        throw new Error('NO_TRACK');
+      }
 
       replaceVideoTrack(screenTrack);
 
@@ -1628,6 +1637,35 @@ btnScreenShare.addEventListener('click', async () => {
 
     } catch (err) {
       console.error('❌ Screen share failed:', err);
+      if (err.message === 'NOT_SUPPORTED') {
+        showToast(
+          currentLang === 'ar' 
+            ? 'مشاركة الشاشة غير مدعومة على هذا المتصفح/الجهاز. يرجى استخدام متصفح Safari الأصلي على iPhone أو Chrome على Android.' 
+            : 'Screen sharing is not supported on this browser/device. Please use native Safari on iPhone or Chrome on Android.', 
+          'danger'
+        );
+      } else if (err.name === 'NotAllowedError' || err.message === 'Permission denied') {
+        showToast(
+          currentLang === 'ar' 
+            ? 'تم رفض إذن مشاركة الشاشة أو إلغاؤه.' 
+            : 'Screen sharing permission was denied or cancelled.', 
+          'warning'
+        );
+      } else if (err.message === 'NO_TRACK') {
+        showToast(
+          currentLang === 'ar' 
+            ? 'لم يتم العثور على مسار فيديو لمشاركة الشاشة.' 
+            : 'No video track found for screen sharing.', 
+          'danger'
+        );
+      } else {
+        showToast(
+          currentLang === 'ar' 
+            ? `فشل بدء مشاركة الشاشة: ${err.message || err}` 
+            : `Failed to start screen sharing: ${err.message || err}`, 
+          'danger'
+        );
+      }
     }
   } else {
     stopScreenSharing();
