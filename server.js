@@ -201,7 +201,8 @@ io.on('connection', (socket) => {
       socket.emit('room-joined', {
         selfId: uid,
         users: activeUsers,
-        chatHistory: chatHistory
+        chatHistory: chatHistory,
+        sessionId: currentSessionId
       });
 
       // Only broadcast to others on fresh join (not reconnect)

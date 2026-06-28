@@ -5,7 +5,7 @@ const translations = {
   ar: {
     pageTitle: "إجتماع داخلي - اجتماعات الشركة",
     loginTitle: "إجتماع داخلي",
-    loginSubtitle: "اجتماعات الشركة الداخلية الكلاسيكية",
+    loginSubtitle: "",
     labelUsername: "اسم المستخدم:",
     usernamePlaceholder: "مثال: أحمد محمد",
     labelCameraSelect: "الكاميرا (الفيديو):",
@@ -80,7 +80,7 @@ const translations = {
   en: {
     pageTitle: "Internal Meeting - Company Meetings",
     loginTitle: "Internal Meeting",
-    loginSubtitle: "Classic internal company meetings",
+    loginSubtitle: "",
     labelUsername: "Username:",
     usernamePlaceholder: "e.g. John Doe",
     labelCameraSelect: "Camera (Video):",
@@ -439,12 +439,12 @@ async function setupDeviceSelectors() {
 
     const t = translations[currentLang];
     if (cameraCount === 0) {
-      const opt = `<option value="">${t.loginSubtitle.includes("Classic") ? "No camera available" : "لا توجد كاميرا متوفرة"}</option>`;
+      const opt = `<option value="">${currentLang === 'en' ? "No camera available" : "لا توجد كاميرا متوفرة"}</option>`;
       loginCameraSelect.innerHTML = opt;
       roomCameraSelect.innerHTML = opt;
     }
     if (micCount === 0) {
-      const opt = `<option value="">${t.loginSubtitle.includes("Classic") ? "No microphone available" : "لا يوجد ميكروفون متوفر"}</option>`;
+      const opt = `<option value="">${currentLang === 'en' ? "No microphone available" : "لا يوجد ميكروفون متوفر"}</option>`;
       loginMicSelect.innerHTML = opt;
       roomMicSelect.innerHTML = opt;
     }
@@ -627,14 +627,25 @@ function createDummyStream() {
   return new MediaStream([videoTrack, audioTrack]);
 }
 
+// Session tracking variables for local storage reports and downloads
+let currentSessionId = null;
+let currentSessionMessages = [];
+let currentSessionFiles = [];
+let meetingStartTime = null;
+
 // ==========================================================================
 // 7. WebRTC Mesh Core Engine & Signaling
 // ==========================================================================
-socket.on('room-joined', ({ selfId, users, chatHistory }) => {
+socket.on('room-joined', ({ selfId, users, chatHistory, sessionId }) => {
   const isReconnect = !!localId; // If localId already set, this is a reconnect
   localId = selfId;
+  currentSessionId = sessionId || null;
   
   if (!isReconnect) {
+    meetingStartTime = new Date();
+    currentSessionMessages = [];
+    currentSessionFiles = [];
+
     // First join: switch screens and load chat history
     loginScreen.classList.add('hidden');
     meetingRoom.classList.remove('hidden');
@@ -1143,6 +1154,18 @@ function setupFileChannel(channel, peerId) {
           finalizeTransferUIItem(transferItemId, downloadUrl);
           
           showToast(formatString(translations[currentLang].fileReceiveSuccess, fileMetadata.name), 'success');
+          
+          // Log received file in current session report
+          if (Array.isArray(currentSessionFiles)) {
+            currentSessionFiles.push({
+              fileName: fileMetadata.name,
+              fileSize: fileMetadata.size,
+              senderName: peersState[peerId]?.name || 'Peer',
+              timestamp: new Date().toISOString(),
+              direction: 'received'
+            });
+          }
+
           fileMetadata = null;
           receivedChunks = [];
           return;
@@ -1179,6 +1202,17 @@ async function shareLocalFile(file) {
 
   const activeChannels = Object.values(fileChannels).filter(c => c.readyState === 'open');
   
+  // Log file sharing in current session report
+  if (Array.isArray(currentSessionFiles)) {
+    currentSessionFiles.push({
+      fileName: file.name,
+      fileSize: file.size,
+      senderName: userName,
+      timestamp: new Date().toISOString(),
+      direction: 'sent'
+    });
+  }
+
   // Log file sharing in database archive
   socket.emit('log-file-share', {
     fileName: file.name,
@@ -1746,6 +1780,9 @@ btnLeave.addEventListener('click', () => {
 });
 
 function leaveRoom() {
+  // Generate, save, and download meeting report before leaving
+  saveAndDownloadMeetingReport();
+  
   socket.emit('leave-room');
   
   if (localStream) {
@@ -1756,10 +1793,95 @@ function leaveRoom() {
   }
 
   for (const id in peerConnections) {
-    peerConnections[id].close();
+    try { peerConnections[id].close(); } catch(e) {}
   }
 
-  window.location.reload();
+  // Reload after a short delay (e.g. 600ms) to ensure file download starts
+  setTimeout(() => {
+    window.location.reload();
+  }, 600);
+}
+
+function saveAndDownloadMeetingReport() {
+  if (!meetingStartTime) return; // If we didn't join a call, don't generate report
+  
+  const endTime = new Date();
+  const durationMs = endTime - meetingStartTime;
+  const durationSec = Math.floor(durationMs / 1000);
+  const durationMin = Math.floor(durationSec / 60);
+  
+  const report = {
+    meetingId: currentSessionId || 'N/A',
+    startTime: meetingStartTime.toISOString(),
+    endTime: endTime.toISOString(),
+    duration: `${durationMin}m ${durationSec % 60}s`,
+    yourName: userName,
+    participants: Object.values(peersState).map(p => p.name),
+    messages: currentSessionMessages.map(m => ({
+      sender: m.user_name,
+      message: m.message,
+      time: new Date(m.sent_at).toLocaleTimeString()
+    })),
+    files: currentSessionFiles
+  };
+  
+  // 1. Save to LocalStorage (Persist in history logs)
+  const historyKey = 'meeting_reports_history';
+  let history = [];
+  try {
+    const existing = localStorage.getItem(historyKey);
+    if (existing) {
+      history = JSON.parse(existing);
+    }
+  } catch (e) {
+    console.error('Failed to parse history from localStorage', e);
+  }
+  history.push(report);
+  localStorage.setItem(historyKey, JSON.stringify(history));
+  
+  // 2. Format as a clean text file report
+  const isAr = (currentLang === 'ar');
+  const cleanTextReport = `==================================================
+${isAr ? '📊 تقرير جلسة الاجتماع: ' : '📊 REPORT FOR MEETING SESSION: '}${report.meetingId}
+==================================================
+${isAr ? 'التاريخ:' : 'Date:'} ${new Date(report.startTime).toLocaleDateString()}
+${isAr ? 'وقت البدء:' : 'Start Time:'} ${new Date(report.startTime).toLocaleTimeString()}
+${isAr ? 'وقت النهاية:' : 'End Time:'} ${new Date(report.endTime).toLocaleTimeString()}
+${isAr ? 'المدة:' : 'Duration:'} ${report.duration}
+${isAr ? 'تم الإنهاء بواسطة:' : 'Organized/Left by:'} ${report.yourName}
+
+${isAr ? '👥 المشاركون:' : '👥 Participants:'}
+--------------------------------------------------
+- ${report.yourName} (${isAr ? 'أنت' : 'You'})
+${report.participants.map(p => `- ${p}`).join('\n')}
+
+${isAr ? '💬 سجل المحادثات:' : '💬 Chat Logs:'} (${report.messages.length} ${isAr ? 'رسالة' : 'messages'})
+--------------------------------------------------
+${report.messages.length === 0 ? (isAr ? '(لا توجد رسائل)' : '(No messages sent)') : report.messages.map(m => `[${m.time}] ${m.sender}: ${m.message}`).join('\n')}
+
+${isAr ? '📂 الملفات المشتركة:' : '📂 Shared Files:'} (${report.files.length} ${isAr ? 'ملف' : 'files'})
+--------------------------------------------------
+${report.files.length === 0 ? (isAr ? '(لم يتم مشاركة ملفات)' : '(No files shared)') : report.files.map(f => `[${new Date(f.timestamp).toLocaleTimeString()}] ${f.senderName} (${f.direction === 'sent' ? (isAr ? 'تم إرساله' : 'Sent') : (isAr ? 'تم استلامه' : 'Received')}): ${f.fileName} (${(f.fileSize / (1024*1024)).toFixed(2)} MB)`).join('\n')}
+==================================================
+${isAr ? 'تم توليد هذا التقرير تلقائياً بواسطة إجتماع داخلي.' : 'Report generated automatically by Statu Meetings.'}
+`;
+
+  // 3. Trigger immediate download of the file
+  try {
+    const blob = new Blob([cleanTextReport], { type: 'text/plain;charset=utf-8' });
+    const filename = `meeting_report_${new Date(report.startTime).toISOString().split('T')[0]}_${report.meetingId}.txt`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    console.log('✅ Meeting report downloaded successfully');
+  } catch (err) {
+    console.error('❌ Failed to trigger report download:', err);
+  }
 }
 
 // ==========================================================================
@@ -1779,6 +1901,14 @@ chatForm.addEventListener('submit', (e) => {
 });
 
 function appendChatMessage(msg) {
+  // Prevent duplicate messages in our memory logs
+  if (Array.isArray(currentSessionMessages)) {
+    const alreadyExists = currentSessionMessages.some(m => m.sent_at === msg.sent_at && m.message === msg.message && m.user_name === msg.user_name);
+    if (!alreadyExists) {
+      currentSessionMessages.push(msg);
+    }
+  }
+
   const isSelf = msg.user_name === userName;
   const bubble = document.createElement('div');
   bubble.className = `chat-bubble ${isSelf ? 'outgoing' : 'incoming'}`;
