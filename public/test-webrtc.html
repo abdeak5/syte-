@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebRTC Diagnostics</title>
+  <style>
+    body { font-family: monospace; background: #0f172a; color: #e2e8f0; padding: 20px; }
+    h1 { color: #38bdf8; }
+    .log { background: #1e293b; padding: 12px; border-radius: 8px; max-height: 500px; overflow-y: auto; font-size: 13px; line-height: 1.6; }
+    .ok { color: #4ade80; }
+    .err { color: #f87171; }
+    .warn { color: #fbbf24; }
+    .info { color: #38bdf8; }
+    button { background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; margin: 5px; font-size: 14px; }
+    button:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <h1>🔬 WebRTC Diagnostics</h1>
+  <button onclick="testTurnCredentials()">1. Test TURN Credentials</button>
+  <button onclick="testLocalMedia()">2. Test Camera/Mic</button>
+  <button onclick="testLoopbackConnection()">3. Test Loopback Connection</button>
+  <button onclick="runFullTest()">Run All Tests</button>
+  <div class="log" id="log"></div>
+
+  <script>
+    const logEl = document.getElementById('log');
+    function log(msg, cls = 'info') {
+      const line = document.createElement('div');
+      line.className = cls;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    async function testTurnCredentials() {
+      log('=== Testing TURN Credentials ===');
+      try {
+        const res = await fetch('/api/turn-credentials');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const servers = await res.json();
+        log(`Received ${servers.length} ICE servers from Metered.ca`, 'ok');
+        servers.forEach((s, i) => {
+          const urls = Array.isArray(s.urls) ? s.urls.join(', ') : s.urls;
+          log(`  [${i}] ${urls} ${s.username ? '(with auth)' : '(no auth)'}`, s.username ? 'ok' : 'warn');
+        });
+        return servers;
+      } catch (err) {
+        log(`TURN credential fetch FAILED: ${err.message}`, 'err');
+        return null;
+      }
+    }
+
+    async function testLocalMedia() {
+      log('=== Testing Local Media ===');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const tracks = stream.getTracks();
+        tracks.forEach(t => {
+          log(`  Track: ${t.kind}, label: ${t.label}, state: ${t.readyState}`, t.readyState === 'live' ? 'ok' : 'err');
+        });
+        // Stop tracks after test
+        tracks.forEach(t => t.stop());
+        log('Local media test PASSED', 'ok');
+        return true;
+      } catch (err) {
+        log(`Local media test FAILED: ${err.message}`, 'err');
+        return false;
+      }
+    }
+
+    async function testLoopbackConnection() {
+      log('=== Testing Loopback WebRTC Connection ===');
+      
+      let iceServers;
+      try {
+        const res = await fetch('/api/turn-credentials');
+        iceServers = await res.json();
+      } catch(e) {
+        iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+      }
+      
+      log(`Using ${iceServers.length} ICE servers`);
+      
+      const config = { iceServers };
+      const pc1 = new RTCPeerConnection(config);
+      const pc2 = new RTCPeerConnection(config);
+      
+      let candidateCount1 = 0, candidateCount2 = 0;
+      let hasSrflx = false, hasRelay = false;
+      
+      pc1.onicecandidate = (e) => {
+        if (e.candidate) {
+          candidateCount1++;
+          const type = e.candidate.type || 'unknown';
+          if (type === 'srflx') hasSrflx = true;
+          if (type === 'relay') hasRelay = true;
+          log(`  PC1 candidate: ${type} ${e.candidate.protocol || ''} ${e.candidate.address || ''}`, 
+            type === 'relay' ? 'ok' : 'info');
+          pc2.addIceCandidate(e.candidate);
+        }
+      };
+      
+      pc2.onicecandidate = (e) => {
+        if (e.candidate) {
+          candidateCount2++;
+          pc1.addIceCandidate(e.candidate);
+        }
+      };
+      
+      return new Promise(async (resolve) => {
+        const timeout = setTimeout(() => {
+          log(`TIMEOUT! State: PC1=${pc1.iceConnectionState}, PC2=${pc2.iceConnectionState}`, 'err');
+          log(`Candidates: PC1=${candidateCount1}, PC2=${candidateCount2}`, 'warn');
+          log(`SRFLX (STUN): ${hasSrflx ? 'YES' : 'NO'}, RELAY (TURN): ${hasRelay ? 'YES' : 'NO'}`, hasSrflx || hasRelay ? 'warn' : 'err');
+          pc1.close(); pc2.close();
+          resolve(false);
+        }, 15000);
+        
+        pc2.ontrack = (event) => {
+          log(`PC2 received ${event.track.kind} track, state: ${event.track.readyState}`, 'ok');
+        };
+        
+        pc1.oniceconnectionstatechange = () => {
+          log(`PC1 ICE state: ${pc1.iceConnectionState}`, 
+            pc1.iceConnectionState === 'connected' || pc1.iceConnectionState === 'completed' ? 'ok' : 'info');
+          
+          if (pc1.iceConnectionState === 'connected' || pc1.iceConnectionState === 'completed') {
+            clearTimeout(timeout);
+            log(`Candidates total: PC1=${candidateCount1}, PC2=${candidateCount2}`, 'ok');
+            log(`SRFLX (STUN): ${hasSrflx ? 'YES' : 'NO'}`, hasSrflx ? 'ok' : 'warn');
+            log(`RELAY (TURN): ${hasRelay ? 'YES' : 'NO'}`, hasRelay ? 'ok' : 'warn');
+            log('🎉 Loopback WebRTC connection SUCCEEDED!', 'ok');
+            
+            // Get stats
+            pc1.getStats().then(stats => {
+              stats.forEach(report => {
+                if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                  log(`  Active pair: local=${report.localCandidateId}, remote=${report.remoteCandidateId}`, 'ok');
+                }
+              });
+              pc1.close(); pc2.close();
+              resolve(true);
+            });
+          } else if (pc1.iceConnectionState === 'failed') {
+            clearTimeout(timeout);
+            log('Loopback connection FAILED!', 'err');
+            log(`RELAY (TURN): ${hasRelay ? 'YES' : 'NO'}`, hasRelay ? 'ok' : 'err');
+            pc1.close(); pc2.close();
+            resolve(false);
+          }
+        };
+        
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          stream.getTracks().forEach(track => pc1.addTrack(track, stream));
+          log(`Added ${stream.getTracks().length} tracks to PC1`, 'ok');
+          
+          const offer = await pc1.createOffer();
+          await pc1.setLocalDescription(offer);
+          await pc2.setRemoteDescription(offer);
+          
+          const answer = await pc2.createAnswer();
+          await pc2.setLocalDescription(answer);
+          await pc1.setRemoteDescription(answer);
+          
+          log('Offer/Answer exchange complete, waiting for ICE...', 'info');
+        } catch (err) {
+          clearTimeout(timeout);
+          log(`Loopback test error: ${err.message}`, 'err');
+          pc1.close(); pc2.close();
+          resolve(false);
+        }
+      });
+    }
+
+    async function runFullTest() {
+      logEl.innerHTML = '';
+      log('🚀 Starting full WebRTC diagnostic...');
+      await testTurnCredentials();
+      await testLocalMedia();
+      await testLoopbackConnection();
+      log('=== All tests complete ===', 'ok');
+    }
+  </script>
+</body>
+</html>
