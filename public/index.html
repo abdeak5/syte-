@@ -104,7 +104,7 @@
                     </div>
                 </div>
 
-                <!-- Left Sidebar: Tabs for Chat, Participants, Files and Settings -->
+                <!-- Left Sidebar: Tabs for Chat, Participants, Files, Archive and Settings -->
                 <aside class="sidebar-meeting meeting-panel" id="meeting-sidebar">
                     <!-- Close Button for Mobile -->
                     <button class="sidebar-close-btn" id="btn-close-sidebar-mobile" title="إغلاق">
@@ -122,6 +122,10 @@
                         <button class="tab-btn" data-tab="files-panel" id="files-tab-btn">
                             <i class="fa-solid fa-folder-open"></i>
                             <span id="tab-files-label">الملفات</span>
+                        </button>
+                        <button class="tab-btn" data-tab="archive-panel" id="archive-tab-btn">
+                            <i class="fa-solid fa-box-archive"></i>
+                            <span id="tab-archive-label">الأرشيف</span>
                         </button>
                         <button class="tab-btn" data-tab="settings-panel" id="settings-tab-btn">
                             <i class="fa-solid fa-sliders"></i>
@@ -170,9 +174,19 @@
                         </div>
                     </div>
 
+                    <!-- Archive Panel -->
+                    <div class="sidebar-content" id="archive-panel">
+                        <div class="sidebar-settings-group">
+                            <h3 id="archive-title">سجل الاجتماعات السابقة</h3>
+                            <p class="settings-help" id="archive-help">اعرض رسائل وملفات الاجتماعات السابقة المؤرشفة.</p>
+                            <div class="archive-list" id="archive-list-container">
+                                <!-- Sessions will be loaded here dynamically -->
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Settings Panel (Mid-Meeting device selector) -->
                     <div class="sidebar-content" id="settings-panel">
-
                         <!-- Performance Boost Control -->
                         <div class="sidebar-settings-group">
                             <h3 id="setting-perf-title">تحسين الأداء</h3>
@@ -230,7 +244,7 @@
                 </div>
 
                 <div class="controls-group">
-                    <!-- Send Files Button (Replaced Toggle Sidebar Button) -->
+                    <!-- Send Files Button -->
                     <button class="control-btn-classic" id="btn-send-files" title="إرسال ملفات">
                         <i class="fa-solid fa-folder-open"></i>
                         <span class="control-label" id="btn-files-label">الملفات</span>
@@ -243,6 +257,37 @@
                     </button>
                 </div>
             </footer>
+        </div>
+    </div>
+
+    <!-- Archive Session Details Modal Overlay -->
+    <div id="archive-details-modal" class="modal-overlay-classic hidden">
+        <div class="modal-content-classic meeting-panel fade-in">
+            <header class="modal-header-classic">
+                <h3 id="modal-archive-title">تفاصيل الاجتماع المؤرشف</h3>
+                <button class="modal-close-btn" id="btn-close-archive-modal">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </header>
+            <div class="modal-body-classic">
+                <div class="session-meta-info">
+                    <span id="modal-session-date">التاريخ: ...</span>
+                    <span id="modal-session-duration">المدة: ...</span>
+                </div>
+                
+                <div class="archive-sections-tabs">
+                    <button class="archive-sec-btn active" id="btn-show-archived-msgs">الرسائل</button>
+                    <button class="archive-sec-btn" id="btn-show-archived-files">الملفات المشتركة</button>
+                </div>
+
+                <div class="archived-section-content active" id="archived-msgs-container">
+                    <!-- Archived chat messages -->
+                </div>
+
+                <div class="archived-section-content hidden" id="archived-files-container">
+                    <!-- Archived files list -->
+                </div>
+            </div>
         </div>
     </div>
 

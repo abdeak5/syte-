@@ -9,7 +9,9 @@ let pool = null;
 // Mock database storage for seamless fallback (in case DATABASE_URL is not set)
 const mockDb = {
   users: {},
-  messages: []
+  messages: [],
+  sessions: [],
+  sharedFiles: []
 };
 
 if (!isMock) {
@@ -17,12 +19,11 @@ if (!isMock) {
   pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
-    max: 10,                // Maximum connections in pool
+    max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000
   });
 
-  // Log connection errors without crashing
   pool.on('error', (err) => {
     console.error('❌ Unexpected Neon pool error:', err.message);
   });
@@ -45,6 +46,38 @@ async function query(text, params) {
 
   const queryStr = text.trim().replace(/\s+/g, ' ').toLowerCase();
 
+  // 1. Session Insert
+  if (queryStr.includes('insert into sessions')) {
+    const sess = {
+      id: mockDb.sessions.length + 1,
+      created_at: new Date(),
+      ended_at: null
+    };
+    mockDb.sessions.push(sess);
+    return { rows: [sess] };
+  }
+
+  // 2. Session Update (End sessions)
+  if (queryStr.includes('update sessions set ended_at')) {
+    if (queryStr.includes('where id =')) {
+      const [ended_at, id] = params;
+      const sess = mockDb.sessions.find(s => s.id === id);
+      if (sess) {
+        sess.ended_at = ended_at || new Date();
+      }
+      return { rows: sess ? [sess] : [] };
+    } else {
+      // Cleanup all uncompleted sessions on startup
+      mockDb.sessions.forEach(s => {
+        if (s.ended_at === null) {
+          s.ended_at = new Date();
+        }
+      });
+      return { rows: [] };
+    }
+  }
+
+  // 3. User Insert (UPSERT)
   if (queryStr.includes('insert into users')) {
     const [id, name, is_muted, is_video_off] = params;
     mockDb.users[id] = {
@@ -58,10 +91,12 @@ async function query(text, params) {
     return { rows: [mockDb.users[id]] };
   }
 
+  // 4. Select Users
   if (queryStr.includes('select * from users')) {
     return { rows: Object.values(mockDb.users) };
   }
 
+  // 5. Delete Users
   if (queryStr.includes('delete from users where id =')) {
     const [id] = params;
     const deleted = mockDb.users[id];
@@ -74,6 +109,7 @@ async function query(text, params) {
     return { rows: [] };
   }
 
+  // 6. Update User status
   if (queryStr.includes('update users set is_hand_raised')) {
     const [is_hand_raised, id] = params;
     if (mockDb.users[id]) {
@@ -98,10 +134,12 @@ async function query(text, params) {
     return { rows: mockDb.users[id] ? [mockDb.users[id]] : [] };
   }
 
+  // 7. Message Insert
   if (queryStr.includes('insert into messages')) {
-    const [user_name, message] = params;
+    const [session_id, user_name, message] = params;
     const msg = {
       id: mockDb.messages.length + 1,
+      session_id,
       user_name,
       message,
       sent_at: new Date()
@@ -110,9 +148,55 @@ async function query(text, params) {
     return { rows: [msg] };
   }
 
+  // 8. Select Messages
   if (queryStr.includes('select * from messages')) {
-    const sorted = [...mockDb.messages].sort((a, b) => a.sent_at - b.sent_at);
-    return { rows: sorted.slice(-100) };
+    if (queryStr.includes('where session_id =')) {
+      const [session_id] = params;
+      const filtered = mockDb.messages.filter(m => m.session_id === session_id);
+      return { rows: filtered.sort((a, b) => a.sent_at - b.sent_at) };
+    } else {
+      const sorted = [...mockDb.messages].sort((a, b) => a.sent_at - b.sent_at);
+      return { rows: sorted.slice(-100) };
+    }
+  }
+
+  // 9. Shared Files Insert
+  if (queryStr.includes('insert into shared_files')) {
+    const [session_id, sender_name, file_name, file_size] = params;
+    const file = {
+      id: mockDb.sharedFiles.length + 1,
+      session_id,
+      sender_name,
+      file_name,
+      file_size,
+      shared_at: new Date()
+    };
+    mockDb.sharedFiles.push(file);
+    return { rows: [file] };
+  }
+
+  // 10. Select Shared Files
+  if (queryStr.includes('select * from shared_files')) {
+    const [session_id] = params;
+    const filtered = mockDb.sharedFiles.filter(f => f.session_id === session_id);
+    return { rows: filtered.sort((a, b) => a.shared_at - b.shared_at) };
+  }
+
+  // 11. Archive List Query
+  if (queryStr.includes('select s.id') && queryStr.includes('count(*)')) {
+    const archive = mockDb.sessions.map(s => {
+      const msgCount = mockDb.messages.filter(m => m.session_id === s.id).length;
+      const fileCount = mockDb.sharedFiles.filter(f => f.session_id === s.id).length;
+      return {
+        id: s.id,
+        created_at: s.created_at,
+        ended_at: s.ended_at,
+        msg_count: msgCount,
+        file_count: fileCount
+      };
+    });
+    // Sort descending by created_at
+    return { rows: archive.sort((a, b) => b.created_at - a.created_at) };
   }
 
   return { rows: [] };

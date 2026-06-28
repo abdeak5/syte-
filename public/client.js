@@ -20,6 +20,7 @@ const translations = {
     tabChat: "الدردشة",
     tabParticipants: "النشطين",
     tabFiles: "الملفات",
+    tabArchive: "الأرشيف",
     tabSettings: "الأجهزة",
     chatPlaceholder: "اكتب رسالة فورية هنا...",
     btnChatSend: "إرسال",
@@ -27,6 +28,19 @@ const translations = {
     sendFileHelp: "الحد الأقصى للملف هو 100 ميغابايت. يتم إرسال الملف مباشرة P2P.",
     btnSelectFile: "اختر ملفاً",
     filesTransferTitle: "حالة النقل والملفات",
+    archiveTitle: "سجل الاجتماعات السابقة",
+    archiveHelp: "اعرض رسائل وملفات الاجتماعات السابقة المؤرشفة.",
+    modalArchiveTitle: "تفاصيل الاجتماع المؤرشف",
+    modalSessionDate: "التاريخ: {0}",
+    modalSessionDuration: "المدة: {0}",
+    btnShowArchivedMsgs: "الرسائل",
+    btnShowArchivedFiles: "الملفات المشتركة",
+    archiveListEmpty: "لا توجد اجتماعات مؤرشفة بعد.",
+    archiveFilesEmpty: "لم يتم مشاركة أي ملفات في هذا الاجتماع.",
+    archiveMsgsEmpty: "لا توجد رسائل دردشة في هذا الاجتماع.",
+    archiveLiveLabel: "نشط حالياً",
+    archiveDurationMin: "{0} دقيقة",
+    archiveDurationSec: "{0} ثانية",
     settingPerfTitle: "تحسين الأداء",
     btnPerfBoostOn: "تحسين الأداء: مفعل ⚡",
     btnPerfBoostOff: "تحسين الأداء: مغلق",
@@ -81,6 +95,7 @@ const translations = {
     tabChat: "Chat",
     tabParticipants: "Participants",
     tabFiles: "Files",
+    tabArchive: "Archive",
     tabSettings: "Devices",
     chatPlaceholder: "Type an instant message here...",
     btnChatSend: "Send",
@@ -88,6 +103,19 @@ const translations = {
     sendFileHelp: "Maximum file size is 100MB. Files are sent directly via P2P.",
     btnSelectFile: "Choose File",
     filesTransferTitle: "Transfer Status & Files",
+    archiveTitle: "Past Meeting Records",
+    archiveHelp: "View messages and files from archived past meetings.",
+    modalArchiveTitle: "Archived Meeting Details",
+    modalSessionDate: "Date: {0}",
+    modalSessionDuration: "Duration: {0}",
+    btnShowArchivedMsgs: "Messages",
+    btnShowArchivedFiles: "Shared Files",
+    archiveListEmpty: "No archived meetings yet.",
+    archiveFilesEmpty: "No files shared during this meeting.",
+    archiveMsgsEmpty: "No chat messages in this meeting.",
+    archiveLiveLabel: "Active Now",
+    archiveDurationMin: "{0} min",
+    archiveDurationSec: "{0} sec",
     settingPerfTitle: "Performance Boost",
     btnPerfBoostOn: "Performance Boost: ON ⚡",
     btnPerfBoostOff: "Performance Boost: OFF",
@@ -165,6 +193,7 @@ function changeLanguage(lang) {
   document.getElementById('tab-chat-label').textContent = t.tabChat;
   document.getElementById('tab-participants-label').textContent = t.tabParticipants;
   document.getElementById('tab-files-label').textContent = t.tabFiles;
+  document.getElementById('tab-archive-label').textContent = t.tabArchive;
   document.getElementById('tab-settings-label').textContent = t.tabSettings;
   document.getElementById('chat-input').placeholder = t.chatPlaceholder;
   document.getElementById('btn-chat-send').textContent = t.btnChatSend;
@@ -173,6 +202,12 @@ function changeLanguage(lang) {
   document.getElementById('send-file-help').textContent = t.sendFileHelp;
   document.getElementById('btn-select-file-label').textContent = t.btnSelectFile;
   document.getElementById('files-transfer-title').textContent = t.filesTransferTitle;
+
+  document.getElementById('archive-title').textContent = t.archiveTitle;
+  document.getElementById('archive-help').textContent = t.archiveHelp;
+  document.getElementById('modal-archive-title').textContent = t.modalArchiveTitle;
+  document.getElementById('btn-show-archived-msgs').textContent = t.btnShowArchivedMsgs;
+  document.getElementById('btn-show-archived-files').textContent = t.btnShowArchivedFiles;
   
   document.getElementById('setting-perf-title').textContent = t.settingPerfTitle;
   document.getElementById('btn-perf-boost-label').textContent = perfBoostActive ? t.btnPerfBoostOn : t.btnPerfBoostOff;
@@ -194,6 +229,7 @@ function changeLanguage(lang) {
   document.getElementById('btn-room-lang-toggle').textContent = lang === 'ar' ? 'English' : 'العربية';
 
   updateParticipantsList();
+  renderArchiveListLocally();
 }
 
 function formatString(str, ...args) {
@@ -224,6 +260,7 @@ let isVideoOff = false;
 let isHandRaised = false;
 let isScreenSharing = false;
 let perfBoostActive = false;
+let archiveListCached = [];
 
 // WebRTC connections map: peerId -> RTCPeerConnection
 const peerConnections = {};
@@ -261,17 +298,20 @@ const sidebarBackdrop = document.getElementById('sidebar-backdrop');
 const chatTabBtn = document.getElementById('chat-tab-btn');
 const participantsTabBtn = document.getElementById('participants-tab-btn');
 const filesTabBtn = document.getElementById('files-tab-btn');
+const archiveTabBtn = document.getElementById('archive-tab-btn');
 const settingsTabBtn = document.getElementById('settings-tab-btn');
 
 const chatPanel = document.getElementById('chat-panel');
 const participantsPanel = document.getElementById('participants-panel');
 const filesPanel = document.getElementById('files-panel');
+const archivePanel = document.getElementById('archive-panel');
 const settingsPanel = document.getElementById('settings-panel');
 
 const chatForm = document.getElementById('chat-form');
 const chatInput = document.getElementById('chat-input');
 const chatMessagesContainer = document.getElementById('chat-messages-container');
 const participantsListContainer = document.getElementById('participants-list-container');
+const archiveListContainer = document.getElementById('archive-list-container');
 
 // Local Overlays
 const localMicBadge = document.getElementById('local-mic-badge');
@@ -702,7 +742,6 @@ socket.on('video-updated', ({ userId, isVideoOff }) => {
 async function initiatePeerConnection(peerId, peerName) {
   const pc = getOrCreatePeerConnection(peerId, peerName);
   
-  // Create P2P DataChannel on the initiating side
   try {
     const dc = pc.createDataChannel('fileTransfer', { ordered: true });
     setupFileChannel(dc, peerId);
@@ -727,14 +766,12 @@ function getOrCreatePeerConnection(peerId, peerName) {
   const pc = new RTCPeerConnection(rtcConfig);
   peerConnections[peerId] = pc;
 
-  // Add tracks
   if (localStream) {
     localStream.getTracks().forEach(track => {
       pc.addTrack(track, localStream);
     });
   }
 
-  // Handle incoming DataChannels on the receiving side
   pc.ondatachannel = (event) => {
     if (event.channel.label === 'fileTransfer') {
       setupFileChannel(event.channel, peerId);
@@ -895,7 +932,6 @@ function setupFileChannel(channel, peerId) {
   let transferItemId = '';
 
   channel.onmessage = (event) => {
-    // Control signaling messages (JSON strings)
     if (typeof event.data === 'string') {
       try {
         const signal = JSON.parse(event.data);
@@ -908,7 +944,6 @@ function setupFileChannel(channel, peerId) {
         }
         
         if (signal.type === 'file-end') {
-          // Compile and release binary blob to trigger user download link
           const blob = new Blob(receivedChunks, { type: fileMetadata.mimeType });
           const downloadUrl = URL.createObjectURL(blob);
           finalizeTransferUIItem(transferItemId, downloadUrl);
@@ -924,7 +959,6 @@ function setupFileChannel(channel, peerId) {
       return;
     }
 
-    // Binary file chunks
     receivedChunks.push(event.data);
     receivedSize += event.data.byteLength;
 
@@ -940,7 +974,6 @@ function setupFileChannel(channel, peerId) {
   };
 }
 
-// Send local file to all connected peers using serialised async/await chunking
 async function shareLocalFile(file) {
   const maxBytes = 100 * 1024 * 1024; // 100 MB
   if (file.size > maxBytes) {
@@ -948,17 +981,23 @@ async function shareLocalFile(file) {
     return;
   }
 
-  // Create UI progress bar for the outgoing file
   const itemId = createTransferUIItem(file.name, true, file.size);
 
   const activeChannels = Object.values(fileChannels).filter(c => c.readyState === 'open');
+  
+  // Log file sharing in database archive
+  socket.emit('log-file-share', {
+    fileName: file.name,
+    fileSize: file.size,
+    senderName: userName
+  });
+
   if (activeChannels.length === 0) {
     updateTransferUIProgress(itemId, 100);
     finalizeTransferUIItem(itemId, null);
     return;
   }
 
-  // Send starts control signal to active channels
   activeChannels.forEach(c => {
     c.send(JSON.stringify({
       type: 'file-start',
@@ -972,10 +1011,8 @@ async function shareLocalFile(file) {
 
   let offset = 0;
   
-  // Chunk sending logic with backpressure handling
   async function queueNextChunks() {
     while (offset < file.size) {
-      // If any of the channels have buffered queues exceeding water limit, pause loop
       const congested = activeChannels.some(c => c.bufferedAmount > HIGH_WATER_MARK);
       if (congested) {
         activeChannels.forEach(c => {
@@ -1007,7 +1044,6 @@ async function shareLocalFile(file) {
       updateTransferUIProgress(itemId, pct);
     }
 
-    // Finished transmission, dispatch ending signal
     activeChannels.forEach(c => {
       if (c.readyState === 'open') {
         c.send(JSON.stringify({ type: 'file-end' }));
@@ -1109,14 +1145,14 @@ fileSelector.addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (file) {
     shareLocalFile(file);
-    fileSelector.value = ''; // Reset selector
+    fileSelector.value = '';
   }
 });
 
 function toggleSidebar(open) {
   if (open) {
     meetingSidebar.classList.add('open');
-    btnSendFiles.classList.remove('glowing-accent'); // Clear notice glow on open
+    btnSendFiles.classList.remove('glowing-accent');
     if (sidebarBackdrop) {
       sidebarBackdrop.classList.remove('hidden');
       setTimeout(() => sidebarBackdrop.classList.add('active'), 10);
@@ -1125,18 +1161,16 @@ function toggleSidebar(open) {
     meetingSidebar.classList.remove('open');
     if (sidebarBackdrop) {
       sidebarBackdrop.classList.remove('active');
-      setTimeout(() => sidebarBackdrop.classList.add('hidden'), 300); // Wait for transition
+      setTimeout(() => sidebarBackdrop.classList.add('hidden'), 300);
     }
   }
 }
 
-// Footer trigger: clicking "Send Files" activates the sidebar tab
 btnSendFiles.addEventListener('click', () => {
   toggleSidebar(true);
   filesTabBtn.click();
 });
 
-// Close sidebar when clicking the dark backdrop
 if (sidebarBackdrop) {
   sidebarBackdrop.addEventListener('click', () => {
     toggleSidebar(false);
@@ -1144,7 +1178,178 @@ if (sidebarBackdrop) {
 }
 
 // ==========================================================================
-// 9. Meeting Controls Actions (Mute, Camera, Screen Share, Raise Hand)
+// 9. Meeting Archives System logic
+// ==========================================================================
+archiveTabBtn.addEventListener('click', () => {
+  socket.emit('get-archive-list');
+});
+
+socket.on('archive-list-response', (list) => {
+  archiveListCached = list;
+  renderArchiveListLocally();
+});
+
+function renderArchiveListLocally() {
+  if (!archiveListContainer) return;
+  archiveListContainer.innerHTML = '';
+
+  const t = translations[currentLang];
+  if (archiveListCached.length === 0) {
+    archiveListContainer.innerHTML = `<p class="settings-help">${t.archiveListEmpty}</p>`;
+    return;
+  }
+
+  archiveListCached.forEach(session => {
+    const item = document.createElement('div');
+    item.className = 'archive-item';
+    
+    const formattedDate = new Date(session.created_at).toLocaleDateString(currentLang === 'ar' ? 'ar-EG' : 'en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    const isLive = !session.ended_at;
+    const titleText = `${currentLang === 'ar' ? 'اجتماع #' : 'Meeting #'}${session.id}`;
+    
+    item.innerHTML = `
+      <div class="archive-item-header">
+          <span class="archive-item-title">${titleText}</span>
+          ${isLive ? `<span class="status-indicator live"></span>` : ''}
+      </div>
+      <div class="archive-item-date">${formattedDate} ${isLive ? `(${t.archiveLiveLabel})` : ''}</div>
+      <div class="archive-item-stats">
+          <span><i class="fa-solid fa-comments"></i> ${session.msg_count}</span>
+          <span><i class="fa-solid fa-file"></i> ${session.file_count}</span>
+      </div>
+    `;
+
+    item.addEventListener('click', () => {
+      socket.emit('get-session-details', { sessionId: session.id });
+    });
+
+    archiveListContainer.appendChild(item);
+  });
+}
+
+// Archive Details Modal handling
+const archiveModal = document.getElementById('archive-details-modal');
+const btnCloseArchiveModal = document.getElementById('btn-close-archive-modal');
+const btnShowArchivedMsgs = document.getElementById('btn-show-archived-msgs');
+const btnShowArchivedFiles = document.getElementById('btn-show-archived-files');
+const archivedMsgsContainer = document.getElementById('archived-msgs-container');
+const archivedFilesContainer = document.getElementById('archived-files-container');
+
+btnCloseArchiveModal.addEventListener('click', () => {
+  archiveModal.classList.add('hidden');
+});
+
+// Close modal on overlay tap
+archiveModal.addEventListener('click', (e) => {
+  if (e.target === archiveModal) {
+    archiveModal.classList.add('hidden');
+  }
+});
+
+btnShowArchivedMsgs.addEventListener('click', () => {
+  btnShowArchivedMsgs.classList.add('active');
+  btnShowArchivedFiles.classList.remove('active');
+  archivedMsgsContainer.classList.remove('hidden');
+  archivedFilesContainer.classList.add('hidden');
+});
+
+btnShowArchivedFiles.addEventListener('click', () => {
+  btnShowArchivedFiles.classList.add('active');
+  btnShowArchivedMsgs.classList.remove('active');
+  archivedFilesContainer.classList.remove('hidden');
+  archivedMsgsContainer.classList.add('hidden');
+});
+
+socket.on('session-details-response', ({ sessionId, messages, files }) => {
+  const session = archiveListCached.find(s => s.id === parseInt(sessionId));
+  if (!session) return;
+
+  const t = translations[currentLang];
+  
+  // Format Date
+  const formattedDate = new Date(session.created_at).toLocaleDateString(currentLang === 'ar' ? 'ar-EG' : 'en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+  document.getElementById('modal-session-date').textContent = formatString(t.modalSessionDate, formattedDate);
+
+  // Calculate Duration
+  let durationText = '';
+  if (session.ended_at) {
+    const diffMs = new Date(session.ended_at) - new Date(session.created_at);
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffSecs / 60);
+    if (diffMins > 0) {
+      durationText = formatString(t.archiveDurationMin, diffMins);
+    } else {
+      durationText = formatString(t.archiveDurationSec, diffSecs);
+    }
+  } else {
+    durationText = t.archiveLiveLabel;
+  }
+  document.getElementById('modal-session-duration').textContent = formatString(t.modalSessionDuration, durationText);
+
+  // Load Messages
+  archivedMsgsContainer.innerHTML = '';
+  if (messages.length === 0) {
+    archivedMsgsContainer.innerHTML = `<p class="settings-help">${t.archiveMsgsEmpty}</p>`;
+  } else {
+    messages.forEach(msg => {
+      const msgItem = document.createElement('div');
+      msgItem.className = 'archived-msg-item';
+      const timeStr = new Date(msg.sent_at).toLocaleTimeString(currentLang === 'ar' ? 'ar-EG' : 'en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+      msgItem.innerHTML = `
+        <div class="archived-msg-meta">
+            <span>${msg.user_name}</span>
+            <span class="archived-msg-time">${timeStr}</span>
+        </div>
+        <div class="archived-msg-text">${escapeHtml(msg.message)}</div>
+      `;
+      archivedMsgsContainer.appendChild(msgItem);
+    });
+  }
+
+  // Load Files Metadata
+  archivedFilesContainer.innerHTML = '';
+  if (files.length === 0) {
+    archivedFilesContainer.innerHTML = `<p class="settings-help">${t.archiveFilesEmpty}</p>`;
+  } else {
+    files.forEach(file => {
+      const fileItem = document.createElement('div');
+      fileItem.className = 'archived-file-item';
+      const sizeText = (parseInt(file.file_size) / (1024 * 1024)).toFixed(2) + ' MB';
+      fileItem.innerHTML = `
+        <div class="archived-file-info">
+            <span class="archived-file-name" title="${file.file_name}">${file.file_name}</span>
+            <span class="archived-file-meta">${sizeText} • <span class="archived-file-sender">${file.sender_name}</span></span>
+        </div>
+        <i class="fa-solid fa-file-invoice" style="font-size: 1.2rem; color: var(--primary-blue);"></i>
+      `;
+      archivedFilesContainer.appendChild(fileItem);
+    });
+  }
+
+  // Active messages tab inside modal by default
+  btnShowArchivedMsgs.click();
+
+  // Show Modal
+  archiveModal.classList.remove('hidden');
+});
+
+// ==========================================================================
+// 10. Meeting Controls Actions (Mute, Camera, Screen Share, Raise Hand)
 // ==========================================================================
 
 // Toggle Microphone (Mute/Unmute)
@@ -1213,7 +1418,6 @@ btnScreenShare.addEventListener('click', async () => {
 
       const screenTrack = screenStream.getVideoTracks()[0];
 
-      // Replace track on all WebRTC peer connections
       replaceVideoTrack(screenTrack);
 
       localVideo.srcObject = screenStream;
@@ -1327,7 +1531,7 @@ function leaveRoom() {
 }
 
 // ==========================================================================
-// 10. Chat & Sidebar UI Actions
+// 11. Chat & Sidebar UI Actions
 // ==========================================================================
 chatForm.addEventListener('submit', (e) => {
   e.preventDefault();
