@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: statu-meetings
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        sync: false

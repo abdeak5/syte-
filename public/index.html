@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="page-title">إجتماع داخلي - اجتماعات الشركة</title>
+    <!-- Google Fonts: Cairo for Arabic, Segoe UI / Outfit fallback for system font feel -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;900&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- 1. LOGIN SCREEN -->
+        <div id="login-screen" class="meeting-panel fade-in">
+            <div class="lang-switch-container">
+                <button type="button" class="lang-btn" id="btn-lang-toggle">English</button>
+            </div>
+            <div class="brand-header">
+                <div class="logo-icon-meeting">
+                    <i class="fa-solid fa-users"></i>
+                </div>
+                <h1 id="login-title">إجتماع داخلي</h1>
+                <p class="subtitle" id="login-subtitle">اجتماعات الشركة الداخلية الكلاسيكية</p>
+            </div>
+            
+            <form id="login-form">
+                <!-- Username Input -->
+                <div class="input-group-classic">
+                    <label for="username" id="label-username">اسم المستخدم:</label>
+                    <input type="text" id="username" required placeholder="مثال: أحمد محمد" autocomplete="off">
+                </div>
+
+                <!-- Camera Select -->
+                <div class="input-group-classic">
+                    <label for="login-camera-select" id="label-camera-select">الكاميرا (الفيديو):</label>
+                    <select id="login-camera-select" class="device-select">
+                        <option value="" id="opt-cam-loading">جاري البحث عن كاميرات...</option>
+                    </select>
+                </div>
+
+                <!-- Mic Select -->
+                <div class="input-group-classic">
+                    <label for="login-mic-select" id="label-mic-select">الميكروفون (الصوت):</label>
+                    <select id="login-mic-select" class="device-select">
+                        <option value="" id="opt-mic-loading">جاري البحث عن ميكروفونات...</option>
+                    </select>
+                </div>
+
+                <!-- Join Button (green glossy style) -->
+                <button type="submit" class="btn-meeting btn-meeting-green btn-block" id="btn-start-call">
+                    <i class="fa-solid fa-phone"></i>
+                    <span id="btn-start-call-text">بدء المكالمة</span>
+                </button>
+            </form>
+            <div class="meeting-footer-note">
+                <span id="footer-note-text">كل الحقوق محفوظة 2026</span>
+            </div>
+        </div>
+
+        <!-- 2. MEETING ROOM SCREEN (Hidden initially) -->
+        <div id="meeting-room" class="hidden">
+            <!-- Top bar -->
+            <header class="meeting-header-classic meeting-panel">
+                <div class="room-info">
+                    <span class="status-indicator live"></span>
+                    <h2 id="room-status-title">مكالمة جماعية نشطة</h2>
+                    <span class="badge" id="participant-count">1 مشاركين</span>
+                </div>
+                <div class="header-left-group">
+                    <button class="lang-btn" id="btn-room-lang-toggle">English</button>
+                    <div class="brand-logo-small">
+                        <i class="fa-solid fa-users"></i>
+                        <span id="app-logo-text">إجتماع داخلي</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Work Area -->
+            <main class="meeting-main">
+                <!-- Sidebar backdrop overlay for mobile views -->
+                <div id="sidebar-backdrop" class="sidebar-backdrop hidden"></div>
+                <!-- Video Grid Area -->
+                <div class="video-grid-container-classic">
+                    <div id="video-grid" class="video-grid">
+                        <!-- Local Video Stream -->
+                        <div class="video-card-classic local-video" id="local-video-card">
+                            <video id="local-video" autoplay muted playsinline></video>
+                            <div class="video-overlay-classic">
+                                <span class="participant-name" id="local-participant-label">أنت (محلي)</span>
+                                <div class="participant-states">
+                                    <span class="state-icon hand-raised-badge hidden" id="local-hand-badge">
+                                        <i class="fa-solid fa-hand"></i>
+                                    </span>
+                                    <span class="state-icon mic-muted-badge hidden" id="local-mic-badge">
+                                        <i class="fa-solid fa-microphone-slash"></i>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Left Sidebar: Tabs for Chat, Participants, Files and Settings -->
+                <aside class="sidebar-meeting meeting-panel" id="meeting-sidebar">
+                    <!-- Close Button for Mobile -->
+                    <button class="sidebar-close-btn" id="btn-close-sidebar-mobile" title="إغلاق">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                    <div class="sidebar-tabs">
+                        <button class="tab-btn active" data-tab="chat-panel" id="chat-tab-btn">
+                            <i class="fa-solid fa-comments"></i>
+                            <span id="tab-chat-label">الدردشة</span>
+                        </button>
+                        <button class="tab-btn" data-tab="participants-panel" id="participants-tab-btn">
+                            <i class="fa-solid fa-users"></i>
+                            <span id="tab-participants-label">النشطين</span>
+                        </button>
+                        <button class="tab-btn" data-tab="files-panel" id="files-tab-btn">
+                            <i class="fa-solid fa-folder-open"></i>
+                            <span id="tab-files-label">الملفات</span>
+                        </button>
+                        <button class="tab-btn" data-tab="settings-panel" id="settings-tab-btn">
+                            <i class="fa-solid fa-sliders"></i>
+                            <span id="tab-settings-label">الأجهزة</span>
+                        </button>
+                    </div>
+
+                    <!-- Chat Panel -->
+                    <div class="sidebar-content active" id="chat-panel">
+                        <div class="chat-messages" id="chat-messages-container">
+                            <!-- Messages appended here dynamically -->
+                        </div>
+                        <form id="chat-form" class="chat-input-area">
+                            <input type="text" id="chat-input" placeholder="اكتب رسالة فورية هنا..." autocomplete="off" required>
+                            <button type="submit" class="btn-send-classic">
+                                <span id="btn-chat-send">إرسال</span>
+                            </button>
+                        </form>
+                    </div>
+
+                    <!-- Participants Panel -->
+                    <div class="sidebar-content" id="participants-panel">
+                        <ul class="participants-list" id="participants-list-container">
+                            <!-- Active users populated here dynamically -->
+                        </ul>
+                    </div>
+
+                    <!-- Files Panel -->
+                    <div class="sidebar-content" id="files-panel">
+                        <div class="sidebar-settings-group">
+                            <h3 id="send-file-title">إرسال ملف للمشاركين</h3>
+                            <p class="settings-help" id="send-file-help">الحد الأقصى للملف هو 100 ميغابايت. يتم إرسال الملف مباشرة P2P.</p>
+                            <div class="file-input-wrapper">
+                                <input type="file" id="file-selector" class="hidden">
+                                <button class="btn-meeting btn-meeting-blue btn-block" id="btn-select-file">
+                                    <i class="fa-solid fa-paperclip"></i>
+                                    <span id="btn-select-file-label">اختر ملفاً</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="sidebar-settings-group">
+                            <h3 id="files-transfer-title">حالة النقل والملفات</h3>
+                            <div class="transfer-list" id="transfer-list-container">
+                                <!-- Transferred files will appear here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Settings Panel (Mid-Meeting device selector) -->
+                    <div class="sidebar-content" id="settings-panel">
+
+                        <!-- Performance Boost Control -->
+                        <div class="sidebar-settings-group">
+                            <h3 id="setting-perf-title">تحسين الأداء</h3>
+                            <button class="btn-meeting btn-meeting-blue btn-block" id="btn-perf-boost">
+                                <i class="fa-solid fa-bolt"></i>
+                                <span id="btn-perf-boost-label">تحسين الأداء: مغلق</span>
+                            </button>
+                            <p class="settings-help" id="perf-help-text">عند التفعيل، يتم خفض استهلاك المعالج عن طريق ضبط الدقة والإطارات تلقائياً حسب نوع جهازك.</p>
+                        </div>
+
+                        <div class="sidebar-settings-group">
+                            <h3 id="setting-camera-title">تغيير الكاميرا النشطة</h3>
+                            <select id="room-camera-select" class="device-select-classic">
+                                <option value="" id="room-cam-loading">جاري البحث...</option>
+                            </select>
+                            <p class="settings-help" id="setting-camera-help">اختر الكاميرا المفضلة وسيتم التحديث تلقائياً لدى جميع الحضور.</p>
+                        </div>
+                        <div class="sidebar-settings-group">
+                            <h3 id="setting-mic-title">تغيير الميكروفون النشط</h3>
+                            <select id="room-mic-select" class="device-select-classic">
+                                <option value="" id="room-mic-loading">جاري البحث...</option>
+                            </select>
+                            <p class="settings-help" id="setting-mic-help">اختر الميكروفون لالتقاط صوتك بشكل أوضح.</p>
+                        </div>
+                    </div>
+                </aside>
+            </main>
+
+            <!-- Control Bar (Footer Dock) -->
+            <footer class="meeting-footer-classic meeting-panel">
+                <div class="controls-group">
+                    <!-- Mic Toggle -->
+                    <button class="control-btn-classic" id="btn-toggle-mic" title="كتم الميكروفون">
+                        <i class="fa-solid fa-microphone"></i>
+                        <span class="control-label" id="btn-mic-label">كتم الصوت</span>
+                    </button>
+                    
+                    <!-- Video Toggle -->
+                    <button class="control-btn-classic" id="btn-toggle-video" title="إيقاف الفيديو">
+                        <i class="fa-solid fa-video"></i>
+                        <span class="control-label" id="btn-video-label">الكاميرا</span>
+                    </button>
+
+                    <!-- Screen Share -->
+                    <button class="control-btn-classic" id="btn-screen-share" title="مشاركة الشاشة">
+                        <i class="fa-solid fa-desktop"></i>
+                        <span class="control-label" id="btn-share-label">المشاركة</span>
+                    </button>
+
+                    <!-- Raise Hand -->
+                    <button class="control-btn-classic" id="btn-raise-hand" title="رفع اليد">
+                        <i class="fa-solid fa-hand"></i>
+                        <span class="control-label" id="btn-hand-label">رفع اليد</span>
+                    </button>
+                </div>
+
+                <div class="controls-group">
+                    <!-- Send Files Button (Replaced Toggle Sidebar Button) -->
+                    <button class="control-btn-classic" id="btn-send-files" title="إرسال ملفات">
+                        <i class="fa-solid fa-folder-open"></i>
+                        <span class="control-label" id="btn-files-label">الملفات</span>
+                    </button>
+
+                    <!-- Leave Room (Red Glossy Button) -->
+                    <button class="control-btn-classic btn-danger-classic" id="btn-leave" title="إنهاء المكالمة">
+                        <i class="fa-solid fa-phone-slash"></i>
+                        <span class="control-label" id="btn-leave-label">إنهاء</span>
+                    </button>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+    <!-- Notification Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Socket.io connection client script -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- WebRTC meeting logic code -->
+    <script src="client.js"></script>
+</body>
+</html>
