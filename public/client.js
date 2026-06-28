@@ -634,12 +634,30 @@ socket.on('user-joined', ({ id, name, is_muted, is_video_off }) => {
   updateGridClasses();
 });
 
+const queuedCandidates = {};
+
+async function processQueuedCandidates(peerId) {
+  const pc = peerConnections[peerId];
+  const candidates = queuedCandidates[peerId];
+  if (pc && candidates) {
+    for (const candidate of candidates) {
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (err) {
+        console.error('❌ Error adding queued ICE candidate:', err);
+      }
+    }
+    delete queuedCandidates[peerId];
+  }
+}
+
 socket.on('webrtc-offer', async ({ from, offer }) => {
   const peerName = peersState[from]?.name || 'Peer';
   const pc = getOrCreatePeerConnection(from, peerName);
   
   try {
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    await processQueuedCandidates(from);
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     
@@ -654,6 +672,7 @@ socket.on('webrtc-answer', async ({ from, answer }) => {
   if (pc) {
     try {
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      await processQueuedCandidates(from);
     } catch (err) {
       console.error('❌ Error setting remote answer:', err);
     }
@@ -662,12 +681,17 @@ socket.on('webrtc-answer', async ({ from, answer }) => {
 
 socket.on('webrtc-ice-candidate', async ({ from, candidate }) => {
   const pc = peerConnections[from];
-  if (pc) {
+  if (pc && pc.remoteDescription && pc.remoteDescription.type) {
     try {
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (err) {
       console.error('❌ Error adding ICE candidate:', err);
     }
+  } else {
+    if (!queuedCandidates[from]) {
+      queuedCandidates[from] = [];
+    }
+    queuedCandidates[from].push(candidate);
   }
 });
 
