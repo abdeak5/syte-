@@ -654,14 +654,18 @@ socket.on('room-joined', ({ selfId, users, chatHistory }) => {
         is_hand_raised: user.is_hand_raised
       };
       
-      // If we don't have an active peer connection for this user, initiate one
-      if (!peerConnections[user.id] || peerConnections[user.id].connectionState === 'closed' || peerConnections[user.id].connectionState === 'failed') {
-        if (peerConnections[user.id]) {
-          // Clean up old dead connection first
-          try { peerConnections[user.id].close(); } catch(e) {}
-          delete peerConnections[user.id];
+      // ONLY initiate peer connection on RECONNECT
+      // On first join, the OTHER user's 'user-joined' handler will call initiatePeerConnection
+      // Starting both sides causes offer collision (both send offers simultaneously → failure)
+      if (isReconnect) {
+        if (!peerConnections[user.id] || peerConnections[user.id].connectionState === 'closed' || peerConnections[user.id].connectionState === 'failed') {
+          if (peerConnections[user.id]) {
+            try { peerConnections[user.id].close(); } catch(e) {}
+            delete peerConnections[user.id];
+          }
+          console.log(`🔄 Re-initiating peer connection to ${user.name} after reconnect`);
+          initiatePeerConnection(user.id, user.name);
         }
-        initiatePeerConnection(user.id, user.name);
       }
     }
   });
@@ -710,14 +714,26 @@ socket.on('webrtc-offer', async ({ from, offer }) => {
   const pc = getOrCreatePeerConnection(from, peerName);
   
   try {
+    // Perfect Negotiation: handle offer collision gracefully
+    // If we already have a local offer pending (glare), we are "polite" and rollback
+    const offerCollision = (pc.signalingState === 'have-local-offer' || pc.signalingState === 'have-remote-offer');
+    
+    if (offerCollision) {
+      console.warn(`⚠️ Offer collision with ${peerName} (state: ${pc.signalingState}). Rolling back...`);
+      await pc.setLocalDescription({ type: 'rollback' });
+    }
+
     await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    console.log(`📥 Set remote offer from ${peerName}`);
+    
     await processQueuedCandidates(from);
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     
     socket.emit('webrtc-answer', { to: from, answer });
+    console.log(`📤 Sent answer to ${peerName}`);
   } catch (err) {
-    console.error('❌ Error handling WebRTC Offer:', err);
+    console.error(`❌ Error handling WebRTC Offer from ${peerName}:`, err);
   }
 });
 
@@ -818,6 +834,9 @@ socket.on('video-updated', ({ userId, isVideoOff }) => {
 });
 
 async function initiatePeerConnection(peerId, peerName) {
+  console.log(`🤝 Initiating peer connection to ${peerName} (${peerId})`);
+  console.log(`📹 Local stream tracks: ${localStream ? localStream.getTracks().map(t => t.kind + ':' + t.readyState).join(', ') : 'NONE'}`);
+  
   const pc = getOrCreatePeerConnection(peerId, peerName);
   
   try {
@@ -831,6 +850,7 @@ async function initiatePeerConnection(peerId, peerName) {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     socket.emit('webrtc-offer', { to: peerId, offer });
+    console.log(`📤 Sent offer to ${peerName}`);
   } catch (err) {
     console.error(`❌ Error initiating connection to ${peerName}:`, err);
   }
@@ -866,7 +886,9 @@ function getOrCreatePeerConnection(peerId, peerName) {
   };
 
   pc.ontrack = (event) => {
-    const remoteStream = event.streams[0] || new MediaStream();
+    console.log(`🎬 ontrack fired from ${peerName}: kind=${event.track.kind}, readyState=${event.track.readyState}, streams=${event.streams.length}`);
+    const remoteStream = event.streams[0] || new MediaStream([event.track]);
+    console.log(`🎬 Remote stream tracks: ${remoteStream.getTracks().map(t => t.kind + ':' + t.readyState).join(', ')}`);
     createOrUpdateVideoTile(peerId, peerName, remoteStream, event.track);
   };
 
