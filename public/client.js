@@ -812,8 +812,8 @@ function getOrCreatePeerConnection(peerId, peerName) {
   };
 
   pc.ontrack = (event) => {
-    const remoteStream = event.streams[0];
-    createOrUpdateVideoTile(peerId, peerName, remoteStream);
+    const remoteStream = event.streams[0] || new MediaStream();
+    createOrUpdateVideoTile(peerId, peerName, remoteStream, event.track);
   };
 
   pc.onconnectionstatechange = () => {
@@ -825,19 +825,23 @@ function getOrCreatePeerConnection(peerId, peerName) {
   return pc;
 }
 
-function createOrUpdateVideoTile(peerId, peerName, stream) {
+function createOrUpdateVideoTile(peerId, peerName, stream, incomingTrack) {
   let card = document.getElementById(`card-${peerId}`);
+  let video = document.getElementById(`video-${peerId}`);
   
   if (!card) {
     card = document.createElement('div');
     card.className = 'video-card-classic fade-in';
     card.id = `card-${peerId}`;
 
-    const video = document.createElement('video');
+    video = document.createElement('video');
     video.id = `video-${peerId}`;
     video.autoplay = true;
     video.playsInline = true;
     video.srcObject = stream;
+    if (incomingTrack && stream.getTracks().indexOf(incomingTrack) === -1) {
+      stream.addTrack(incomingTrack);
+    }
 
     const autoplayNotice = document.createElement('div');
     autoplayNotice.className = 'autoplay-notice hidden';
@@ -851,7 +855,7 @@ function createOrUpdateVideoTile(peerId, peerName, stream) {
       autoplayNotice.classList.remove('hidden');
       card.style.cursor = 'pointer';
       card.addEventListener('click', () => {
-        video.play();
+        video.play().catch(e => console.error("Play failed:", e));
         autoplayNotice.classList.add('hidden');
         card.style.cursor = '';
       }, { once: true });
@@ -895,9 +899,23 @@ function createOrUpdateVideoTile(peerId, peerName, stream) {
     
     updateGridClasses();
   } else {
-    const video = document.getElementById(`video-${peerId}`);
-    if (video && video.srcObject !== stream) {
-      video.srcObject = stream;
+    if (video) {
+      const currentStream = video.srcObject;
+      if (currentStream instanceof MediaStream) {
+        if (incomingTrack && currentStream.getTracks().indexOf(incomingTrack) === -1) {
+          currentStream.addTrack(incomingTrack);
+        }
+        stream.getTracks().forEach(track => {
+          if (currentStream.getTracks().indexOf(track) === -1) {
+            currentStream.addTrack(track);
+          }
+        });
+      } else {
+        video.srcObject = stream;
+      }
+      
+      // Attempt to play just in case the state was paused
+      video.play().catch(() => {});
     }
   }
 }
