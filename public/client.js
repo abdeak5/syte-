@@ -265,6 +265,13 @@ const rtcConfig = {
   ]
 };
 
+// Persistent Unique User ID
+let myUid = sessionStorage.getItem('meeting_uid');
+if (!myUid) {
+  myUid = 'uid-' + Math.random().toString(36).substring(2, 15);
+  sessionStorage.setItem('meeting_uid', myUid);
+}
+
 // Application State
 let localStream = null;
 let screenStream = null;
@@ -571,7 +578,7 @@ loginForm.addEventListener('submit', async (e) => {
       }
     }
 
-    socket.emit('join-room', { name: userName });
+    socket.emit('join-room', { name: userName, uid: myUid });
 
     if (selectedCamId) roomCameraSelect.value = selectedCamId;
     if (selectedMicId) roomMicSelect.value = selectedMicId;

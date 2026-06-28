@@ -21,10 +21,15 @@ const PORT = process.env.PORT || 3000;
 // Global tracking of current active session ID
 let currentSessionId = null;
 
+// Mapping of UID -> Socket ID
+const uidToSocketId = {};
+// Disconnection timeouts for grace period: UID -> setTimeout ID
+const disconnectTimeouts = {};
+
 // Serve static client assets
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Health check endpoint for deployment platforms
+// Health check endpoint
 app.get('/health', async (req, res) => {
   const dbHealth = await db.healthCheck();
   res.json({
@@ -56,11 +61,21 @@ async function cleanupSessions() {
 
 // Socket.io Real-Time Orchestration
 io.on('connection', (socket) => {
-  console.log(`🔌 New client connected: ${socket.id}`);
+  console.log(`🔌 Socket connected: ${socket.id}`);
 
   // User Joins Meeting Room
-  socket.on('join-room', async ({ name }) => {
+  socket.on('join-room', async ({ name, uid }) => {
     try {
+      socket.uid = uid;
+      uidToSocketId[uid] = socket.id;
+
+      // Clear any pending grace period disconnection for this user
+      if (disconnectTimeouts[uid]) {
+        clearTimeout(disconnectTimeouts[uid]);
+        delete disconnectTimeouts[uid];
+        console.log(`🔄 User ${name} (${uid}) reconnected within grace period.`);
+      }
+
       // 1. Check if we need to start a new meeting session (if active user count is 0)
       const activeUsersCountRes = await db.query('SELECT COUNT(*) FROM users');
       const activeCount = parseInt(activeUsersCountRes.rows[0].count);
@@ -71,15 +86,15 @@ io.on('connection', (socket) => {
         console.log(`🎬 Started new meeting session: ID ${currentSessionId}`);
       }
 
-      // 2. Insert user into the database
+      // 2. Insert user into database (keyed by persistent UID)
       await db.query(
         `INSERT INTO users (id, name, is_muted, is_video_off)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (id) DO UPDATE SET name = $2, is_muted = $3, is_video_off = $4, joined_at = CURRENT_TIMESTAMP`,
-        [socket.id, name, false, false]
+         ON CONFLICT (id) DO UPDATE SET name = $2, joined_at = CURRENT_TIMESTAMP`,
+        [uid, name, false, false]
       );
 
-      console.log(`👤 User joined: ${name} (${socket.id}) inside session ${currentSessionId}`);
+      console.log(`👤 User joined: ${name} (${uid}) inside session ${currentSessionId}`);
 
       // 3. Fetch current active participants
       const usersRes = await db.query('SELECT * FROM users ORDER BY joined_at ASC');
@@ -94,14 +109,14 @@ io.on('connection', (socket) => {
 
       // Send room state to joining user
       socket.emit('room-joined', {
-        selfId: socket.id,
+        selfId: uid,
         users: activeUsers,
         chatHistory: chatHistory
       });
 
       // Broadcast to others
       socket.broadcast.emit('user-joined', {
-        id: socket.id,
+        id: uid,
         name: name,
         is_muted: false,
         is_video_off: false
@@ -112,19 +127,28 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Signaling: WebRTC Offer
+  // Signaling: WebRTC Offer (Routed via UID)
   socket.on('webrtc-offer', ({ to, offer }) => {
-    io.to(to).emit('webrtc-offer', { from: socket.id, offer });
+    const targetSocketId = uidToSocketId[to];
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-offer', { from: socket.uid, offer });
+    }
   });
 
-  // Signaling: WebRTC Answer
+  // Signaling: WebRTC Answer (Routed via UID)
   socket.on('webrtc-answer', ({ to, answer }) => {
-    io.to(to).emit('webrtc-answer', { from: socket.id, answer });
+    const targetSocketId = uidToSocketId[to];
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-answer', { from: socket.uid, answer });
+    }
   });
 
-  // Signaling: ICE Candidates
+  // Signaling: ICE Candidates (Routed via UID)
   socket.on('webrtc-ice-candidate', ({ to, candidate }) => {
-    io.to(to).emit('webrtc-ice-candidate', { from: socket.id, candidate });
+    const targetSocketId = uidToSocketId[to];
+    if (targetSocketId) {
+      io.to(targetSocketId).emit('webrtc-ice-candidate', { from: socket.uid, candidate });
+    }
   });
 
   // Chat Messaging
@@ -191,8 +215,10 @@ io.on('connection', (socket) => {
   // Hand Raise Toggle
   socket.on('toggle-hand-raise', async ({ isHandRaised }) => {
     try {
-      await db.query('UPDATE users SET is_hand_raised = $1 WHERE id = $2', [isHandRaised, socket.id]);
-      io.emit('hand-raise-updated', { userId: socket.id, isHandRaised });
+      if (socket.uid) {
+        await db.query('UPDATE users SET is_hand_raised = $1 WHERE id = $2', [isHandRaised, socket.uid]);
+        io.emit('hand-raise-updated', { userId: socket.uid, isHandRaised });
+      }
     } catch (err) {
       console.error('❌ Error handling toggle-hand-raise:', err.message);
     }
@@ -201,8 +227,10 @@ io.on('connection', (socket) => {
   // Mute Toggle
   socket.on('toggle-mute', async ({ isMuted }) => {
     try {
-      await db.query('UPDATE users SET is_muted = $1 WHERE id = $2', [isMuted, socket.id]);
-      io.emit('mute-updated', { userId: socket.id, isMuted });
+      if (socket.uid) {
+        await db.query('UPDATE users SET is_muted = $1 WHERE id = $2', [isMuted, socket.uid]);
+        io.emit('mute-updated', { userId: socket.uid, isMuted });
+      }
     } catch (err) {
       console.error('❌ Error handling toggle-mute:', err.message);
     }
@@ -211,33 +239,55 @@ io.on('connection', (socket) => {
   // Video Toggle
   socket.on('toggle-video', async ({ isVideoOff }) => {
     try {
-      await db.query('UPDATE users SET is_video_off = $1 WHERE id = $2', [isVideoOff, socket.id]);
-      io.emit('video-updated', { userId: socket.id, isVideoOff });
+      if (socket.uid) {
+        await db.query('UPDATE users SET is_video_off = $1 WHERE id = $2', [isVideoOff, socket.uid]);
+        io.emit('video-updated', { userId: socket.uid, isVideoOff });
+      }
     } catch (err) {
       console.error('❌ Error handling toggle-video:', err.message);
     }
   });
 
-  // User Explicitly Leaves Meeting
+  // User Explicitly Leaves Meeting (Immediate Disconnect - No Grace Period)
   socket.on('leave-room', async () => {
-    await handleUserDisconnection(socket);
+    const uid = socket.uid;
+    if (uid) {
+      if (disconnectTimeouts[uid]) {
+        clearTimeout(disconnectTimeouts[uid]);
+        delete disconnectTimeouts[uid];
+      }
+      await handleRealUserDisconnection(uid);
+    }
   });
 
-  // Connection Disconnected (Browser Close / Network Drop)
-  socket.on('disconnect', async () => {
-    console.log(`🔌 Client disconnected: ${socket.id}`);
-    await handleUserDisconnection(socket);
+  // Connection Disconnected (Grace Period Handling for momentary drops)
+  socket.on('disconnect', () => {
+    const uid = socket.uid;
+    if (!uid) return;
+
+    console.log(`🔌 Socket disconnected for UID: ${uid}. Starting grace period.`);
+    
+    // Clear lookup mapping
+    if (uidToSocketId[uid] === socket.id) {
+      delete uidToSocketId[uid];
+    }
+
+    // Set 7-second grace period timeout before deleting user
+    disconnectTimeouts[uid] = setTimeout(async () => {
+      delete disconnectTimeouts[uid];
+      await handleRealUserDisconnection(uid);
+    }, 7000);
   });
 });
 
-// Handle client removal and update active user list
-async function handleUserDisconnection(socket) {
+// Handle real/permanent user removal
+async function handleRealUserDisconnection(uid) {
   try {
-    const userRes = await db.query('DELETE FROM users WHERE id = $1 RETURNING name', [socket.id]);
+    const userRes = await db.query('DELETE FROM users WHERE id = $1 RETURNING name', [uid]);
     if (userRes.rows.length > 0) {
       const userName = userRes.rows[0].name;
-      console.log(`👤 User left: ${userName} (${socket.id})`);
-      io.emit('user-left', { id: socket.id, name: userName });
+      console.log(`👤 User left permanently: ${userName} (${uid})`);
+      io.emit('user-left', { id: uid, name: userName });
     }
 
     // Check if the room became empty to close the current meeting session
@@ -250,7 +300,7 @@ async function handleUserDisconnection(socket) {
       currentSessionId = null;
     }
   } catch (err) {
-    console.error('❌ Error handling user disconnection:', err.message);
+    console.error('❌ Error handling real user disconnection:', err.message);
   }
 }
 
