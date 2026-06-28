@@ -258,28 +258,28 @@ socket.on('connect', () => {
     socket.emit('join-room', { name: userName, uid: myUid });
   }
 });
-const rtcConfig = {
+// WebRTC Configuration — starts with STUN, upgraded to TURN dynamically
+let rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:stun2.l.google.com:19302' },
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
+    { urls: 'stun:stun1.l.google.com:19302' }
   ]
 };
+
+// Fetch TURN credentials from server (Metered.ca)
+async function fetchTurnCredentials() {
+  try {
+    const response = await fetch('/api/turn-credentials');
+    if (!response.ok) throw new Error('Failed to fetch TURN credentials');
+    const iceServers = await response.json();
+    rtcConfig = { iceServers };
+    console.log('🔑 TURN credentials loaded:', iceServers.length, 'servers');
+  } catch (err) {
+    console.warn('⚠️ Could not load TURN credentials, using STUN only:', err.message);
+  }
+}
+// Fetch immediately on page load
+fetchTurnCredentials();
 
 // Persistent Unique User ID
 let myUid = sessionStorage.getItem('meeting_uid');

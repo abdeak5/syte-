@@ -39,6 +39,46 @@ app.get('/health', async (req, res) => {
   });
 });
 
+// ========================================================================
+// TURN Server Credentials (Metered.ca)
+// ========================================================================
+const METERED_DOMAIN = process.env.METERED_DOMAIN || 'system4.metered.live';
+const METERED_API_KEY = process.env.METERED_API_KEY || 'v1U5BRFnXuIYAQZhc1wRyfue0u6pt851lX-RCpJ3oqvf9tt1';
+
+let cachedTurnCredentials = null;
+let turnCacheExpiry = 0;
+const TURN_CACHE_TTL = 5 * 60 * 1000; // Cache for 5 minutes
+
+app.get('/api/turn-credentials', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (cachedTurnCredentials && now < turnCacheExpiry) {
+      return res.json(cachedTurnCredentials);
+    }
+
+    const response = await fetch(
+      `https://${METERED_DOMAIN}/api/v1/turn/credentials?apiKey=${METERED_API_KEY}`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Metered API returned ${response.status}`);
+    }
+
+    cachedTurnCredentials = await response.json();
+    turnCacheExpiry = now + TURN_CACHE_TTL;
+
+    console.log('🔑 Fetched fresh TURN credentials from Metered.ca');
+    res.json(cachedTurnCredentials);
+  } catch (err) {
+    console.error('❌ Failed to fetch TURN credentials:', err.message);
+    // Fallback to basic STUN-only if Metered API is unreachable
+    res.json([
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' }
+    ]);
+  }
+});
+
 // Clean up any stale active users on server startup
 async function cleanupStaleUsers() {
   try {

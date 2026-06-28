@@ -10,3 +10,7 @@ services:
         value: 3000
       - key: DATABASE_URL
         sync: false
+      - key: METERED_DOMAIN
+        value: system4.metered.live
+      - key: METERED_API_KEY
+        value: v1U5BRFnXuIYAQZhc1wRyfue0u6pt851lX-RCpJ3oqvf9tt1
