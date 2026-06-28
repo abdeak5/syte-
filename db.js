@@ -92,6 +92,10 @@ async function query(text, params) {
   }
 
   // 4. Select Users
+  if (queryStr.includes('select id from users where id =')) {
+    const [id] = params;
+    return { rows: mockDb.users[id] ? [{ id }] : [] };
+  }
   if (queryStr.includes('select * from users')) {
     return { rows: Object.values(mockDb.users) };
   }

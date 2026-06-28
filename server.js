@@ -76,17 +76,23 @@ io.on('connection', (socket) => {
         console.log(`🔄 User ${name} (${uid}) reconnected within grace period.`);
       }
 
-      // 1. Check if we need to start a new meeting session (if active user count is 0)
-      const activeUsersCountRes = await db.query('SELECT COUNT(*) FROM users');
-      const activeCount = parseInt(activeUsersCountRes.rows[0].count);
+      // Check if user already exists in DB (reconnect vs fresh join)
+      const existingUser = await db.query('SELECT id FROM users WHERE id = $1', [uid]);
+      const isReconnect = existingUser.rows.length > 0;
 
-      if (activeCount === 0 || !currentSessionId) {
-        const sessRes = await db.query('INSERT INTO sessions (created_at) VALUES (DEFAULT) RETURNING id');
-        currentSessionId = sessRes.rows[0].id;
-        console.log(`🎬 Started new meeting session: ID ${currentSessionId}`);
+      // 1. Check if we need to start a new meeting session (if active user count is 0)
+      if (!isReconnect) {
+        const activeUsersCountRes = await db.query('SELECT COUNT(*) FROM users');
+        const activeCount = parseInt(activeUsersCountRes.rows[0].count);
+
+        if (activeCount === 0 || !currentSessionId) {
+          const sessRes = await db.query('INSERT INTO sessions (created_at) VALUES (DEFAULT) RETURNING id');
+          currentSessionId = sessRes.rows[0].id;
+          console.log(`🎬 Started new meeting session: ID ${currentSessionId}`);
+        }
       }
 
-      // 2. Insert user into database (keyed by persistent UID)
+      // 2. Insert/update user in database (keyed by persistent UID)
       await db.query(
         `INSERT INTO users (id, name, is_muted, is_video_off)
          VALUES ($1, $2, $3, $4)
@@ -94,7 +100,11 @@ io.on('connection', (socket) => {
         [uid, name, false, false]
       );
 
-      console.log(`👤 User joined: ${name} (${uid}) inside session ${currentSessionId}`);
+      if (isReconnect) {
+        console.log(`🔄 User reconnected: ${name} (${uid}) — socket mapping updated only`);
+      } else {
+        console.log(`👤 User joined: ${name} (${uid}) inside session ${currentSessionId}`);
+      }
 
       // 3. Fetch current active participants
       const usersRes = await db.query('SELECT * FROM users ORDER BY joined_at ASC');
@@ -114,13 +124,15 @@ io.on('connection', (socket) => {
         chatHistory: chatHistory
       });
 
-      // Broadcast to others
-      socket.broadcast.emit('user-joined', {
-        id: uid,
-        name: name,
-        is_muted: false,
-        is_video_off: false
-      });
+      // Only broadcast to others on fresh join (not reconnect)
+      if (!isReconnect) {
+        socket.broadcast.emit('user-joined', {
+          id: uid,
+          name: name,
+          is_muted: false,
+          is_video_off: false
+        });
+      }
     } catch (err) {
       console.error('❌ Error handling join-room:', err.message);
       socket.emit('error', { message: 'Failed to join the meeting room.' });

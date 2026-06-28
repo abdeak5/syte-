@@ -241,7 +241,23 @@ function formatString(str, ...args) {
 // ==========================================================================
 // 2. Connection and WebRTC Configurations
 // ==========================================================================
-const socket = io();
+const socket = io({
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
+  timeout: 20000
+});
+
+// When socket reconnects after a drop, re-join room to restore signaling
+socket.on('connect', () => {
+  console.log('🔌 Socket connected:', socket.id);
+  if (userName && localId) {
+    // We were in a call — re-join to restore signaling path
+    console.log('🔄 Re-joining room after socket reconnect...');
+    socket.emit('join-room', { name: userName, uid: myUid });
+  }
+});
 const rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -615,14 +631,18 @@ function createDummyStream() {
 // 7. WebRTC Mesh Core Engine & Signaling
 // ==========================================================================
 socket.on('room-joined', ({ selfId, users, chatHistory }) => {
+  const isReconnect = !!localId; // If localId already set, this is a reconnect
   localId = selfId;
   
-  loginScreen.classList.add('hidden');
-  meetingRoom.classList.remove('hidden');
-  meetingRoom.classList.add('fade-in');
-  
-  chatHistory.forEach(msg => appendChatMessage(msg));
-  scrollToBottom(chatMessagesContainer);
+  if (!isReconnect) {
+    // First join: switch screens and load chat history
+    loginScreen.classList.add('hidden');
+    meetingRoom.classList.remove('hidden');
+    meetingRoom.classList.add('fade-in');
+    
+    chatHistory.forEach(msg => appendChatMessage(msg));
+    scrollToBottom(chatMessagesContainer);
+  }
 
   users.forEach(user => {
     if (user.id !== localId) {
@@ -633,11 +653,23 @@ socket.on('room-joined', ({ selfId, users, chatHistory }) => {
         is_video_off: user.is_video_off,
         is_hand_raised: user.is_hand_raised
       };
+      
+      // If we don't have an active peer connection for this user, initiate one
+      if (!peerConnections[user.id] || peerConnections[user.id].connectionState === 'closed' || peerConnections[user.id].connectionState === 'failed') {
+        if (peerConnections[user.id]) {
+          // Clean up old dead connection first
+          try { peerConnections[user.id].close(); } catch(e) {}
+          delete peerConnections[user.id];
+        }
+        initiatePeerConnection(user.id, user.name);
+      }
     }
   });
 
   changeLanguage(currentLang);
-  showToast(formatString(translations[currentLang].toastJoinSelf, userName), 'success');
+  if (!isReconnect) {
+    showToast(formatString(translations[currentLang].toastJoinSelf, userName), 'success');
+  }
 });
 
 socket.on('user-joined', ({ id, name, is_muted, is_video_off }) => {
@@ -838,23 +870,64 @@ function getOrCreatePeerConnection(peerId, peerName) {
     createOrUpdateVideoTile(peerId, peerName, remoteStream, event.track);
   };
 
+  // =====================================================================
+  // ICE Connection State: handles network-level connectivity (NAT/TURN)
+  // =====================================================================
+  let iceRestartAttempts = 0;
+  const MAX_ICE_RESTARTS = 3;
+
+  pc.oniceconnectionstatechange = () => {
+    console.log(`🧊 ICE State for ${peerName}: ${pc.iceConnectionState}`);
+    
+    if (pc.iceConnectionState === 'failed') {
+      if (iceRestartAttempts < MAX_ICE_RESTARTS) {
+        iceRestartAttempts++;
+        console.warn(`🔄 ICE restart attempt ${iceRestartAttempts}/${MAX_ICE_RESTARTS} for ${peerName}`);
+        
+        // ICE Restart: re-negotiate without destroying the peer connection
+        pc.createOffer({ iceRestart: true }).then(offer => {
+          return pc.setLocalDescription(offer);
+        }).then(() => {
+          socket.emit('webrtc-offer', { to: peerId, offer: pc.localDescription });
+        }).catch(err => {
+          console.error('❌ ICE restart offer failed:', err);
+        });
+      }
+    } else if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+      iceRestartAttempts = 0; // Reset on success
+      console.log(`✅ ICE connected to ${peerName}`);
+    } else if (pc.iceConnectionState === 'disconnected') {
+      // 'disconnected' is temporary - WebRTC may auto-recover
+      console.warn(`⚠️ ICE disconnected from ${peerName}, waiting for auto-recovery...`);
+    }
+  };
+
+  // =====================================================================
+  // Connection State: overall peer connection health
+  // =====================================================================
   let failTimeout = null;
+
   pc.onconnectionstatechange = () => {
-    console.log(`📡 WebRTC Connection State for ${peerName}: ${pc.connectionState}`);
+    console.log(`📡 Connection State for ${peerName}: ${pc.connectionState}`);
+    
     if (pc.connectionState === 'failed') {
-      // Wait 8 seconds before closing to allow auto-recovery or ICE restart
+      // Give 10 seconds for ICE restart to work before giving up
       failTimeout = setTimeout(() => {
         if (pc.connectionState === 'failed') {
-          console.warn(`❌ Connection to ${peerName} failed permanently.`);
+          console.warn(`❌ Connection to ${peerName} failed permanently after all retries.`);
           closePeerConnection(peerId);
         }
-      }, 8000);
-    } else if (pc.connectionState === 'connected' || pc.connectionState === 'completed') {
+      }, 10000);
+    } else if (pc.connectionState === 'connected') {
       if (failTimeout) {
         clearTimeout(failTimeout);
         failTimeout = null;
       }
     } else if (pc.connectionState === 'closed') {
+      if (failTimeout) {
+        clearTimeout(failTimeout);
+        failTimeout = null;
+      }
       closePeerConnection(peerId);
     }
   };
