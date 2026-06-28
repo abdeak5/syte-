@@ -825,6 +825,32 @@ function getOrCreatePeerConnection(peerId, peerName) {
   return pc;
 }
 
+function playVideo(video, peerId) {
+  const card = document.getElementById(`card-${peerId}`);
+  const autoplayNotice = document.getElementById(`autoplay-notice-${peerId}`);
+  if (!video || !card || !autoplayNotice) return;
+
+  video.play().then(() => {
+    autoplayNotice.classList.add('hidden');
+    card.style.cursor = '';
+  }).catch(err => {
+    console.warn(`⚠️ Autoplay block for peer ${peerId}:`, err.message);
+    autoplayNotice.classList.remove('hidden');
+    card.style.cursor = 'pointer';
+    
+    const playHandler = () => {
+      video.play().then(() => {
+        autoplayNotice.classList.add('hidden');
+        card.style.cursor = '';
+        card.removeEventListener('click', playHandler);
+      }).catch(e => console.error("❌ Play failed after click:", e));
+    };
+    
+    card.removeEventListener('click', playHandler);
+    card.addEventListener('click', playHandler);
+  });
+}
+
 function createOrUpdateVideoTile(peerId, peerName, stream, incomingTrack) {
   let card = document.getElementById(`card-${peerId}`);
   let video = document.getElementById(`video-${peerId}`);
@@ -845,21 +871,12 @@ function createOrUpdateVideoTile(peerId, peerName, stream, incomingTrack) {
 
     const autoplayNotice = document.createElement('div');
     autoplayNotice.className = 'autoplay-notice hidden';
+    autoplayNotice.id = `autoplay-notice-${peerId}`;
     autoplayNotice.innerHTML = `
       <i class="fa-solid fa-volume-xmark"></i>
       <span id="autoplay-text-${peerId}">${currentLang === 'ar' ? 'انقر لتشغيل الصوت' : 'Click to unmute'}</span>
     `;
     card.appendChild(autoplayNotice);
-
-    video.play().catch(err => {
-      autoplayNotice.classList.remove('hidden');
-      card.style.cursor = 'pointer';
-      card.addEventListener('click', () => {
-        video.play().catch(e => console.error("Play failed:", e));
-        autoplayNotice.classList.add('hidden');
-        card.style.cursor = '';
-      }, { once: true });
-    });
 
     const overlay = document.createElement('div');
     overlay.className = 'video-overlay-classic';
@@ -898,6 +915,9 @@ function createOrUpdateVideoTile(peerId, peerName, stream, incomingTrack) {
     videoGrid.appendChild(card);
     
     updateGridClasses();
+    
+    // Attempt play
+    playVideo(video, peerId);
   } else {
     if (video) {
       const currentStream = video.srcObject;
@@ -914,8 +934,8 @@ function createOrUpdateVideoTile(peerId, peerName, stream, incomingTrack) {
         video.srcObject = stream;
       }
       
-      // Attempt to play just in case the state was paused
-      video.play().catch(() => {});
+      // Attempt play again on track updates
+      playVideo(video, peerId);
     }
   }
 }
